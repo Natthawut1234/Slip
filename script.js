@@ -687,13 +687,15 @@ function cleanMemo(value) {
     .replace(/^[:：\-\s]+/, "");
 
   const normalizedMemo = normalizeThaiMemoSpacing(memo);
-  if (!normalizedMemo) {
+  const calendarFixedMemo = normalizeThaiCalendarInMemo(normalizedMemo);
+
+  if (!calendarFixedMemo) {
     return "";
   }
-  if (/^[-.]+$/.test(normalizedMemo)) {
+  if (/^[-.]+$/.test(calendarFixedMemo)) {
     return "";
   }
-  return normalizedMemo;
+  return calendarFixedMemo;
 }
 
 function normalizeThaiMemoSpacing(value) {
@@ -713,6 +715,48 @@ function normalizeThaiMemoSpacing(value) {
   }
 
   return output.trim();
+}
+
+function normalizeThaiCalendarInMemo(value) {
+  if (!value) {
+    return "";
+  }
+
+  let out = value
+    .replace(/เดือน(?=[ก-๙])/g, "เดือน ")
+    .replace(/\s*,\s*/g, ", ")
+    .replace(/\.\s+(\d{4})/g, ".$1");
+
+  // Handle common OCR confusion where "ก.พ." is read as "ท.พ." or similar.
+  out = replaceThaiMonthToken(out, "[กทฑตด]\\s*\\.?\\s*พ\\s*\\.?", "ก.พ.");
+
+  const monthRules = [
+    { token: "ม\\s*\\.?\\s*ค\\s*\\.?", canonical: "ม.ค." },
+    { token: "มี\\s*\\.?\\s*ค\\s*\\.?", canonical: "มี.ค." },
+    { token: "เม\\s*\\.?\\s*ย\\s*\\.?", canonical: "เม.ย." },
+    { token: "พ\\s*\\.?\\s*ย\\s*\\.?", canonical: "พ.ย." },
+    { token: "พ\\s*\\.?\\s*ค\\s*\\.?", canonical: "พ.ค." },
+    { token: "มิ\\s*\\.?\\s*ย\\s*\\.?", canonical: "มิ.ย." },
+    { token: "ก\\s*\\.?\\s*ค\\s*\\.?", canonical: "ก.ค." },
+    { token: "ส\\s*\\.?\\s*ค\\s*\\.?", canonical: "ส.ค." },
+    { token: "ก\\s*\\.?\\s*ย\\s*\\.?", canonical: "ก.ย." },
+    { token: "ต\\s*\\.?\\s*ค\\s*\\.?", canonical: "ต.ค." },
+    { token: "ธ\\s*\\.?\\s*ค\\s*\\.?", canonical: "ธ.ค." }
+  ];
+
+  monthRules.forEach((rule) => {
+    out = replaceThaiMonthToken(out, rule.token, rule.canonical);
+  });
+
+  return out.replace(/\s{2,}/g, " ").trim();
+}
+
+function replaceThaiMonthToken(value, tokenPattern, canonical) {
+  const pattern = new RegExp(
+    `(^|[^ก-๙A-Za-z0-9])(?:${tokenPattern})(?=(?:\\d{2,4})?(?:[^ก-๙A-Za-z0-9]|$))`,
+    "g"
+  );
+  return value.replace(pattern, `$1${canonical}`);
 }
 
 function extractMemoAroundLabel(line, nextLine, hints) {
