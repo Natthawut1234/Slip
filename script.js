@@ -727,8 +727,12 @@ function normalizeThaiCalendarInMemo(value) {
     .replace(/\s*,\s*/g, ", ")
     .replace(/\.\s+(\d{4})/g, ".$1");
 
-  // Handle common OCR confusion where "ก.พ." is read as "ท.พ." or similar.
-  out = replaceThaiMonthToken(out, "[กทฑตด]\\s*\\.?\\s*พ\\s*\\.?", "ก.พ.");
+  // Handle common OCR confusion where "ก.พ." is read as "ท.พ.", "N.พ." or "N.W.".
+  out = replaceThaiMonthToken(
+    out,
+    "[กทฑตดNnHhMmWw]\\s*\\.?\\s*[พPwW]\\s*\\.?",
+    "ก.พ."
+  );
 
   const monthRules = [
     { token: "ม\\s*\\.?\\s*ค\\s*\\.?", canonical: "ม.ค." },
