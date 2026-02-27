@@ -2,85 +2,146 @@
 <html lang="th">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Slip Reader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Slip Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <meta name="theme-color" content="#0ea5a4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
   <div class="bg-shape shape-a"></div>
   <div class="bg-shape shape-b"></div>
+  <div class="bg-shape shape-c"></div>
 
   <main class="app">
+    <!-- ─── Header ──────────────────────────────────── -->
     <header class="hero card">
-      <!-- <p class="eyebrow">OCR Browser</p> -->
-      <h1>Slip Manager</h1>
-      <p class="subtitle">เลือกไฟล์สลิป แล้วสรุปผลเป็นตาราง (จำนวนเงิน + บันทึกช่วยจำ)</p>
+      <div class="hero-icon">
+        <svg viewBox="0 0 40 40" width="40" height="40" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="30" height="34" rx="4"/><path d="M12 12h16M12 18h10M12 24h14"/><circle cx="28" cy="28" r="7" fill="#06b6d4" stroke="#fff" stroke-width="2"/><path d="M26 28h4M28 26v4" stroke="#fff" stroke-width="1.8"/></svg>
+      </div>
+      <div class="hero-text">
+        <h1>Slip Manager</h1>
+        <p class="subtitle">อัปโหลดสลิป อ่านอัตโนมัติ สรุปเป็นตาราง</p>
+      </div>
     </header>
 
-    <section class="controls card">
-      <label class="file-input-wrap" for="slipInput">
-        <span>เลือกไฟล์สลิป (หลายไฟล์)</span>
+    <!-- ─── Upload ──────────────────────────────────── -->
+    <section class="controls card" id="uploadSection">
+      <label id="dropZone" class="drop-zone" for="slipInput">
+        <div class="drop-zone-content">
+          <div class="drop-icon-wrap">
+            <svg class="drop-icon" viewBox="0 0 48 48" width="44" height="44" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="6" width="36" height="36" rx="8" opacity=".3"/>
+              <path d="M24 30V16m0 0l-6 6m6-6l6 6"/>
+              <path d="M14 34h20"/>
+            </svg>
+          </div>
+          <p class="drop-text">ลากไฟล์สลิปมาวางที่นี่</p>
+          <p class="drop-subtext">รองรับ JPG, PNG, WEBP — เลือกได้หลายไฟล์</p>
+        </div>
+        <span class="drop-btn">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>
+          เลือกไฟล์สลิป
+        </span>
         <input id="slipInput" type="file" accept="image/*" multiple>
       </label>
-      <p id="fileCountText" class="hint no-margin">ยังไม่ได้เลือกไฟล์ใหม่ (ข้อมูลในตารางยังอยู่)</p>
+
+      <div class="upload-info">
+        <p id="fileCountText" class="file-count">ยังไม่ได้เลือกไฟล์</p>
+      </div>
 
       <div class="actions">
-        <button id="scanBtn" type="button">อ่านสลิป</button>
-        <button id="clearBtn" type="button" class="secondary">เคลียร์ตาราง</button>
+        <button id="scanBtn" type="button" class="btn-scan">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="5.5"/><path d="M12 12l4 4"/></svg>
+          <span class="btn-text">อ่านสลิป</span>
+        </button>
+        <button id="clearBtn" type="button" class="secondary">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5"/><path d="M3 4l1 10a1 1 0 001 1h6a1 1 0 001-1l1-10"/></svg>
+          เคลียร์
+        </button>
       </div>
 
       <div class="status-wrap">
-        <p id="statusText">รออัปโหลดรูปสลิป</p>
+        <div id="scanSpinner" class="scan-spinner" style="display:none;">
+          <div class="spinner-ring"></div>
+          <span>กำลังอ่าน…</span>
+        </div>
+        <p id="statusText" class="status-text">รออัปโหลดรูปสลิป</p>
         <div class="progress-track" aria-hidden="true">
           <div id="progressBar" class="progress-bar"></div>
         </div>
       </div>
     </section>
 
-    <section class="card">
-      <h2>ผลลัพธ์แบบตาราง</h2>
+    <!-- ─── Results ─────────────────────────────────── -->
+    <section class="card results-card">
+      <div class="section-header">
+        <h2>
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="3" width="16" height="14" rx="3"/><path d="M2 8h16M7 8v9"/></svg>
+          ผลลัพธ์
+        </h2>
+      </div>
+
+      <div id="sumRow" class="sum-banner" style="display:none;">
+        <div class="sum-left">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 2"/></svg>
+          <span class="sum-label">ยอดรวม</span>
+        </div>
+        <strong id="sumAmount"></strong>
+      </div>
+
       <div class="table-actions">
-        <button id="importExcelBtn" type="button" class="small-btn">Import Excel</button>
-        <button id="exportBtn" type="button" class="small-btn">Export Excel</button>
+        <button id="importExcelBtn" type="button" class="small-btn ghost-btn">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7.5 1v9M4 7.5l3.5 3.5L11 7.5M2 13h11"/></svg>
+          Import
+        </button>
+        <button id="exportBtn" type="button" class="small-btn ghost-btn">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7.5 10V1M4 3.5L7.5 0 11 3.5M2 13h11"/></svg>
+          Export
+        </button>
         <button id="selectAllBtn" type="button" class="secondary small-btn">เลือกทั้งหมด</button>
         <button id="deleteSelectedBtn" type="button" class="danger small-btn">ลบที่เลือก</button>
       </div>
+
       <input id="importExcelInput" type="file" accept=".xlsx,.xls" hidden>
+
+      <p class="hint edit-hint">💡 แตะ/ดับเบิลคลิกที่เซลล์เพื่อแก้ไขข้อมูล</p>
+
       <div class="table-wrap">
         <table class="result-table">
           <thead>
             <tr>
-              <th class="check-col">เลือก</th>
-              <th>สลิป</th>
+              <th class="check-col"><span class="sr-only">เลือก</span></th>
+              <th class="order-col">#</th>
               <th>จำนวนเงิน</th>
               <th>บันทึกช่วยจำ</th>
             </tr>
           </thead>
           <tbody id="resultBody">
             <tr class="empty-row">
-              <td colspan="4">ยังไม่มีผลลัพธ์</td>
+              <td colspan="4">
+                <div class="empty-state">
+                  <svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="#b0c8d8" stroke-width="1.5" stroke-linecap="round"><rect x="4" y="4" width="28" height="28" rx="6"/><path d="M12 18h12M18 12v12" opacity=".4"/></svg>
+                  <span>ยังไม่มีผลลัพธ์</span>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <section class="card note-card">
-      <h2>หมายเหตุ</h2>
-      <div class="result-list">
-        <!-- <div class="result-row">
-          <span>ความเร็ว</span>
-          <strong>อ่านทีละสลิปแบบอัตโนมัติ</strong>
-        </div> -->
-        <div class="result-row result-row-note">
-          <span>รองรับ</span>
-          <strong>สลิปไทยที่มีข้อความ "จำนวน" และ "บันทึกช่วยจำ"</strong>
-        </div>
-      </div>
-    </section>
+    <!-- ─── Footer Note ─────────────────────────────── -->
+    <footer class="card note-card">
+      <p class="note-text">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 5v3M8 10.5v.5"/></svg>
+        รองรับสลิปไทยที่มีข้อความ "จำนวน" และ "บันทึกช่วยจำ"
+      </p>
+    </footer>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>

@@ -12,16 +12,22 @@ const elements = {
   statusText: document.getElementById("statusText"),
   progressBar: document.getElementById("progressBar"),
   fileCountText: document.getElementById("fileCountText"),
-  resultBody: document.getElementById("resultBody")
+  resultBody: document.getElementById("resultBody"),
+  dropZone: document.getElementById("dropZone"),
+  sumRow: document.getElementById("sumRow"),
+  sumAmount: document.getElementById("sumAmount")
 };
 
 const state = {
   files: [],
-  busy: false
+  busy: false,
+  workerPool: [],
+  workerPoolReady: false
 };
 
-const IMAGE_MAX_WIDTH = 960;
+const IMAGE_MAX_WIDTH = 700;
 const OCR_PRIMARY_BOTTOM_RATIO = 0.52;
+const WORKER_POOL_SIZE = 3;
 
 const THAI_DIGITS = {
   "๐": "0",
@@ -61,18 +67,23 @@ const MEMO_BLOCKLIST_HINTS_NORMALIZED = MEMO_BLOCKLIST_HINTS.map((label) => norm
 
 elements.slipInput.addEventListener("change", onFileSelected);
 elements.scanBtn.addEventListener("click", onScanClicked);
-elements.clearBtn.addEventListener("click", clearAll);
+elements.clearBtn.addEventListener("click", confirmClearAll);
 elements.importExcelBtn.addEventListener("click", onImportExcelClicked);
 elements.importExcelInput.addEventListener("change", onImportExcelSelected);
 elements.exportBtn.addEventListener("click", exportTableToExcel);
 elements.selectAllBtn.addEventListener("click", toggleSelectAllRows);
-elements.deleteSelectedBtn.addEventListener("click", deleteSelectedRows);
+elements.deleteSelectedBtn.addEventListener("click", confirmDeleteSelected);
 elements.resultBody.addEventListener("change", onResultBodyChanged);
+elements.resultBody.addEventListener("dblclick", onCellDoubleClick);
+
+// Drag & Drop
+setupDragAndDrop();
 
 setStatus("รออัปโหลดรูปสลิป", 0);
 updateFileCount(0);
 resetTable();
 updateSelectionActions();
+initWorkerPool();
 
 function onFileSelected(event) {
   const files = Array.from(event.target.files || []).filter((file) => file.type.startsWith("image/"));
@@ -85,6 +96,75 @@ function onFileSelected(event) {
   }
 
   setStatus(`พร้อมอ่าน ${files.length} สลิป (ผลใหม่จะต่อท้ายตาราง)`, 0);
+}
+
+// ─── Worker Pool ────────────────────────────────────────────
+async function initWorkerPool() {
+  if (typeof Tesseract === "undefined") return;
+  try {
+    setStatus("กำลังเตรียม OCR engine…", 5);
+    const promises = [];
+    for (let i = 0; i < WORKER_POOL_SIZE; i++) {
+      promises.push(createWorker());
+    }
+    state.workerPool = await Promise.all(promises);
+    state.workerPoolReady = true;
+    setStatus("รออัปโหลดรูปสลิป (OCR พร้อมแล้ว)", 0);
+  } catch (err) {
+    console.error("Worker pool init failed", err);
+    state.workerPoolReady = false;
+    setStatus("รออัปโหลดรูปสลิป", 0);
+  }
+}
+
+async function createWorker() {
+  const worker = await Tesseract.createWorker("eng+tha", 1, {
+    logger: () => {}
+  });
+  return worker;
+}
+
+async function getWorker() {
+  if (state.workerPool.length > 0) {
+    return state.workerPool.pop();
+  }
+  return createWorker();
+}
+
+function returnWorker(worker) {
+  state.workerPool.push(worker);
+}
+
+// ─── Drag & Drop ────────────────────────────────────────────
+function setupDragAndDrop() {
+  const dropZone = elements.dropZone;
+  if (!dropZone) return;
+
+  ["dragenter", "dragover"].forEach((ev) => {
+    dropZone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add("drag-over");
+    });
+  });
+
+  ["dragleave", "drop"].forEach((ev) => {
+    dropZone.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove("drag-over");
+    });
+  });
+
+  dropZone.addEventListener("drop", (e) => {
+    const dt = e.dataTransfer;
+    if (!dt?.files?.length) return;
+    const files = Array.from(dt.files).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) return;
+    state.files = files;
+    updateFileCount(files.length);
+    setStatus(`พร้อมอ่าน ${files.length} สลิป (ผลใหม่จะต่อท้ายตาราง)`, 0);
+  });
 }
 
 async function onScanClicked() {
@@ -107,31 +187,51 @@ async function onScanClicked() {
   elements.scanBtn.disabled = true;
   elements.clearBtn.disabled = true;
   setTableActionDisabled(true);
+  showScanSpinner(true);
 
   const total = state.files.length;
   const startOrder = getNextOrder();
+  let completed = 0;
 
   try {
-    for (let i = 0; i < total; i += 1) {
-      const file = state.files[i];
-      const order = startOrder + i;
+    // Parallel processing with worker pool
+    const concurrency = Math.min(WORKER_POOL_SIZE, total);
+    const results = new Array(total).fill(null);
+    let nextIndex = 0;
 
-      try {
-        const parsed = await processSlipFile(file, i, total);
-        appendResultRow(order, parsed.amount || "-", parsed.memo || "-");
-      } catch (error) {
-        console.error(error);
-        appendResultRow(order, "-", "อ่านไม่สำเร็จ");
+    const runNext = async () => {
+      while (nextIndex < total) {
+        const idx = nextIndex++;
+        const file = state.files[idx];
+        try {
+          results[idx] = await processSlipFile(file, idx, total);
+        } catch (error) {
+          console.error(error);
+          results[idx] = { amount: "-", memo: "อ่านไม่สำเร็จ" };
+        }
+        completed++;
+        const percent = Math.round((completed / total) * 100);
+        setStatus(`อ่านแล้ว ${completed}/${total} สลิป`, percent);
       }
+    };
 
-      const percent = Math.round(((i + 1) / total) * 100);
-      setStatus(`อ่านแล้ว ${i + 1}/${total} สลิป`, percent);
+    const workers = [];
+    for (let i = 0; i < concurrency; i++) {
+      workers.push(runNext());
+    }
+    await Promise.all(workers);
+
+    // Append results in order
+    for (let i = 0; i < total; i++) {
+      const parsed = results[i] || { amount: "-", memo: "-" };
+      appendResultRow(startOrder + i, parsed.amount || "-", parsed.memo || "-");
     }
 
     setStatus(`อ่านครบ ${total} สลิปแล้ว`, 100);
     state.files = [];
     elements.slipInput.value = "";
     updateFileCount(0);
+    updateSumRow();
   } finally {
     state.busy = false;
     elements.slipInput.disabled = false;
@@ -139,6 +239,7 @@ async function onScanClicked() {
     elements.clearBtn.disabled = false;
     setTableActionDisabled(false);
     updateSelectionActions();
+    showScanSpinner(false);
   }
 }
 
@@ -153,22 +254,12 @@ async function processSlipFile(file, fileIndex, totalFiles) {
 
   const primaryCanvas = buildBottomCropCanvas(processedCanvas, OCR_PRIMARY_BOTTOM_RATIO) || processedCanvas;
 
-  const primaryText = await runOcr(primaryCanvas, (progress) => {
-    setStatus(
-      `กำลังอ่านสลิป ${fileIndex + 1}/${totalFiles}: ${file.name}`,
-      mapFileProgress(fileIndex, totalFiles, 0.04 + progress * 0.78)
-    );
-  });
+  const primaryText = await runOcr(primaryCanvas);
 
   const parsed = parseSlipText(primaryText);
 
   if (!parsed.amount || !parsed.memo) {
-    const fallbackText = await runOcr(processedCanvas, (progress) => {
-      setStatus(
-        `กำลังเก็บข้อมูลเพิ่ม ${fileIndex + 1}/${totalFiles}: ${file.name}`,
-        mapFileProgress(fileIndex, totalFiles, 0.84 + progress * 0.14)
-      );
-    });
+    const fallbackText = await runOcr(processedCanvas);
 
     const fallbackParsed = parseSlipText(fallbackText);
     if (!parsed.amount) {
@@ -188,22 +279,70 @@ function mapFileProgress(fileIndex, totalFiles, localProgress) {
   return Math.round(fileIndex * each + safeLocal * each);
 }
 
-async function runOcr(canvas, onProgress) {
-  const result = await Tesseract.recognize(canvas, "eng+tha", {
-    logger: (message) => {
-      if (
-        message &&
-        typeof message === "object" &&
-        message.status === "recognizing text" &&
-        typeof message.progress === "number" &&
-        typeof onProgress === "function"
-      ) {
-        onProgress(clamp(message.progress, 0, 1));
-      }
-    }
-  });
+async function runOcr(canvas) {
+  const worker = await getWorker();
+  try {
+    const result = await worker.recognize(canvas);
+    return normalizeText(result?.data?.text || "");
+  } finally {
+    returnWorker(worker);
+  }
+}
 
-  return normalizeText(result?.data?.text || "");
+// ─── Confirm Dialogs ────────────────────────────────────────
+function confirmClearAll() {
+  if (state.busy) return;
+  const rows = getDataRows();
+  if (rows.length === 0) {
+    clearAll();
+    return;
+  }
+  showConfirmModal("ต้องการเคลียร์ตารางทั้งหมดใช่ไหม?", clearAll);
+}
+
+function confirmDeleteSelected() {
+  if (state.busy) return;
+  const rows = getDataRows();
+  const selectedRows = rows.filter((row) => {
+    const check = row.querySelector(".row-check");
+    return check instanceof HTMLInputElement && check.checked;
+  });
+  if (selectedRows.length === 0) {
+    setStatus("ยังไม่ได้เลือกแถวที่จะลบ", getCurrentProgressValue());
+    return;
+  }
+  showConfirmModal(`ต้องการลบ ${selectedRows.length} แถวที่เลือกใช่ไหม?`, deleteSelectedRows);
+}
+
+function showConfirmModal(message, onConfirm) {
+  const existing = document.getElementById("confirmModal");
+  if (existing) existing.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "confirmModal";
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <p class="modal-message">${message}</p>
+      <div class="modal-actions">
+        <button class="modal-confirm" type="button">ยืนยัน</button>
+        <button class="modal-cancel secondary" type="button">ยกเลิก</button>
+      </div>
+    </div>
+  `;
+
+  const close = () => overlay.remove();
+  overlay.querySelector(".modal-confirm").addEventListener("click", () => { close(); onConfirm(); });
+  overlay.querySelector(".modal-cancel").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  document.body.appendChild(overlay);
+  overlay.querySelector(".modal-confirm").focus();
+}
+
+// ─── Spinner ────────────────────────────────────────────────
+function showScanSpinner(show) {
+  const el = document.getElementById("scanSpinner");
+  if (el) el.style.display = show ? "flex" : "none";
 }
 
 function clearAll() {
@@ -215,6 +354,7 @@ function clearAll() {
   updateFileCount(0);
   setStatus("ล้างข้อมูลแล้ว", 0);
   updateSelectionActions();
+  updateSumRow();
 }
 
 function resetTable() {
@@ -251,10 +391,14 @@ function appendResultRow(order, amount, memo) {
   orderCell.textContent = String(order);
 
   const amountCell = document.createElement("td");
+  amountCell.className = "editable-cell";
   amountCell.textContent = amount;
+  amountCell.title = "ดับเบิลคลิกเพื่อแก้ไข";
 
   const memoCell = document.createElement("td");
+  memoCell.className = "editable-cell";
   memoCell.textContent = memo;
+  memoCell.title = "ดับเบิลคลิกเพื่อแก้ไข";
 
   row.appendChild(selectCell);
   row.appendChild(orderCell);
@@ -262,6 +406,36 @@ function appendResultRow(order, amount, memo) {
   row.appendChild(memoCell);
   elements.resultBody.appendChild(row);
   updateSelectionActions();
+  updateSumRow();
+}
+
+// ─── Editable Cells ─────────────────────────────────────────
+function onCellDoubleClick(event) {
+  const cell = event.target.closest(".editable-cell");
+  if (!cell || cell.querySelector("input")) return;
+
+  const currentText = cell.textContent;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "inline-edit";
+  input.value = currentText;
+
+  cell.textContent = "";
+  cell.appendChild(input);
+  input.focus();
+  input.select();
+
+  const save = () => {
+    const newValue = input.value.trim() || "-";
+    cell.textContent = newValue;
+    updateSumRow();
+  };
+
+  input.addEventListener("blur", save);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+    if (e.key === "Escape") { input.value = currentText; input.blur(); }
+  });
 }
 
 function getDataRows() {
@@ -329,6 +503,7 @@ function deleteSelectedRows() {
 
   setStatus(`ลบแล้ว ${selectedRows.length} แถว`, clamp(parseInt(elements.progressBar.style.width, 10) || 0, 0, 100));
   updateSelectionActions();
+  updateSumRow();
 }
 
 function renumberRows() {
@@ -367,6 +542,33 @@ function updateSelectionActions() {
   elements.selectAllBtn.textContent = allChecked ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด";
   elements.selectAllBtn.disabled = state.busy || !hasRows;
   elements.deleteSelectedBtn.disabled = state.busy || selectedCount === 0;
+}
+
+// ─── Sum Row ────────────────────────────────────────────────
+function updateSumRow() {
+  const rows = getDataRows();
+  let total = 0;
+  let count = 0;
+
+  rows.forEach((row) => {
+    const amountText = (row.children[2]?.textContent || "")
+      .replace(/[^\d.,]/g, "")
+      .replace(/,/g, "");
+    const n = Number.parseFloat(amountText);
+    if (Number.isFinite(n) && n > 0) {
+      total += n;
+      count++;
+    }
+  });
+
+  if (elements.sumRow) {
+    elements.sumRow.style.display = count > 0 ? "" : "none";
+  }
+  if (elements.sumAmount) {
+    elements.sumAmount.textContent = count > 0
+      ? `${total.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท (${count} รายการ)`
+      : "";
+  }
 }
 
 function onImportExcelClicked() {
@@ -415,6 +617,7 @@ async function onImportExcelSelected(event) {
 
     setStatus(`นำเข้า Excel สำเร็จ (${importedRows.length} แถว)`, getCurrentProgressValue());
     updateSelectionActions();
+    updateSumRow();
   } catch (error) {
     console.error(error);
     setStatus("นำเข้า Excel ไม่สำเร็จ", getCurrentProgressValue());
