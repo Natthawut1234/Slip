@@ -79,6 +79,9 @@ elements.resultBody.addEventListener("dblclick", onCellDoubleClick);
 // Drag & Drop
 setupDragAndDrop();
 
+// Fix mobile table scroll — ให้เลื่อนแนวตั้งผ่านตารางได้เสมอ
+setupTableTouchScroll();
+
 setStatus("รออัปโหลดรูปสลิป", 0);
 updateFileCount(0);
 resetTable();
@@ -165,6 +168,53 @@ function setupDragAndDrop() {
     updateFileCount(files.length);
     setStatus(`พร้อมอ่าน ${files.length} สลิป (ผลใหม่จะต่อท้ายตาราง)`, 0);
   });
+}
+
+// ─── Touch direction detection สำหรับ .table-wrap ───────────────
+// ถ้าผู้ใช้เลื่อนแนวตั้ง → ปล่อยให้ page scroll ปกติ
+// ถ้าเลื่อนแนวนอน → ให้ table scroll ตามปกติ
+function setupTableTouchScroll() {
+  const wrap = document.querySelector(".table-wrap");
+  if (!wrap) return;
+
+  let startX = 0;
+  let startY = 0;
+  let direction = null; // "h" | "v"
+
+  wrap.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    direction = null;
+    // คืน touch-action เป็นค่าเดิมทุกครั้งเริ่มสัมผัสใหม่
+    wrap.style.touchAction = "";
+  }, { passive: true });
+
+  wrap.addEventListener("touchmove", (e) => {
+    if (direction) return; // ตัดสินแล้ว
+
+    const t = e.touches[0];
+    const dx = Math.abs(t.clientX - startX);
+    const dy = Math.abs(t.clientY - startY);
+
+    // ต้องเลื่อนอย่างน้อย 8px ก่อนตัดสินทิศทาง
+    if (dx < 8 && dy < 8) return;
+
+    if (dy > dx) {
+      // แนวตั้ง → ให้ page scroll ได้ (ล็อกแนวนอนของ table)
+      direction = "v";
+      wrap.style.touchAction = "pan-y";
+    } else {
+      // แนวนอน → ให้ table scroll ได้
+      direction = "h";
+      wrap.style.touchAction = "pan-x";
+    }
+  }, { passive: true });
+
+  wrap.addEventListener("touchend", () => {
+    direction = null;
+    wrap.style.touchAction = "";
+  }, { passive: true });
 }
 
 async function onScanClicked() {

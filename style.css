@@ -509,38 +509,45 @@ button.ghost-btn:hover:not(:disabled) {
 .table-wrap {
   width: 100%;
   overflow-x: auto;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
   border: 1px solid var(--line-light);
   border-radius: var(--radius-md);
   background: var(--bg-card-solid);
+  /* ป้องกัน touch ดักในแนวตั้ง — ให้ page scroll ได้ปกติ */
+  touch-action: pan-y pinch-zoom;
 }
 
 .result-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 480px;
+  /* ไม่บังคับ min-width บนมือถือ — ตารางจะ fit หน้าจอ */
 }
 
 .result-table thead th {
   text-align: left;
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-soft);
   background: var(--line-light);
   border-bottom: 1px solid var(--line);
-  padding: 10px 12px;
+  padding: 8px 8px;
   position: sticky;
   top: 0;
   z-index: 2;
+  white-space: nowrap;
 }
 
 .result-table tbody td {
-  padding: 12px 12px;
+  padding: 10px 8px;
   border-bottom: 1px solid var(--line-light);
   vertical-align: middle;
-  font-size: 0.92rem;
+  font-size: 0.88rem;
+  word-break: break-word;
 }
 
 .result-table tbody tr:last-child td {
@@ -556,14 +563,14 @@ button.ghost-btn:hover:not(:disabled) {
 }
 
 .check-col {
-  width: 46px;
+  width: 36px;
   text-align: center;
-  padding-left: 8px !important;
-  padding-right: 4px !important;
+  padding-left: 6px !important;
+  padding-right: 2px !important;
 }
 
 .order-col {
-  width: 42px;
+  width: 32px;
   text-align: center;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -728,8 +735,35 @@ canvas { display: block; width: 100%; height: auto; }
    Responsive  Tablet & Desktop
     */
 
+/* บนจอ >= 520px อนุญาต horizontal scroll + min-width */
 @media (min-width: 520px) {
   body { font-size: 16px; }
+
+  .table-wrap {
+    touch-action: auto;
+  }
+
+  .result-table {
+    min-width: 480px;
+  }
+
+  .result-table thead th {
+    padding: 10px 12px;
+    font-size: 0.82rem;
+  }
+
+  .result-table tbody td {
+    padding: 12px 12px;
+    font-size: 0.92rem;
+  }
+
+  .check-col {
+    width: 46px;
+    padding-left: 8px !important;
+    padding-right: 4px !important;
+  }
+
+  .order-col { width: 42px; }
 
   .app {
     padding: 20px 20px 32px;
