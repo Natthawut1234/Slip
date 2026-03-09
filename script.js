@@ -15,7 +15,8 @@ const elements = {
   resultBody: document.getElementById("resultBody"),
   dropZone: document.getElementById("dropZone"),
   sumRow: document.getElementById("sumRow"),
-  sumAmount: document.getElementById("sumAmount")
+  sumAmount: document.getElementById("sumAmount"),
+  receiptBtn: document.getElementById("receiptBtn")
 };
 
 const state = {
@@ -73,6 +74,7 @@ elements.importExcelInput.addEventListener("change", onImportExcelSelected);
 elements.exportBtn.addEventListener("click", exportTableToExcel);
 elements.selectAllBtn.addEventListener("click", toggleSelectAllRows);
 elements.deleteSelectedBtn.addEventListener("click", confirmDeleteSelected);
+elements.receiptBtn.addEventListener("click", exportReceipt);
 elements.resultBody.addEventListener("change", onResultBodyChanged);
 elements.resultBody.addEventListener("dblclick", onCellDoubleClick);
 
@@ -573,6 +575,7 @@ function renumberRows() {
 function setTableActionDisabled(disabled) {
   elements.importExcelBtn.disabled = disabled;
   elements.exportBtn.disabled = disabled;
+  elements.receiptBtn.disabled = disabled;
   elements.selectAllBtn.disabled = disabled;
   elements.deleteSelectedBtn.disabled = disabled;
 }
@@ -589,6 +592,7 @@ function updateSelectionActions() {
 
   elements.importExcelBtn.disabled = state.busy;
   elements.exportBtn.disabled = state.busy || selectedCount === 0;
+  elements.receiptBtn.disabled = state.busy || selectedCount === 0;
   elements.selectAllBtn.textContent = allChecked ? "ยกเลิกเลือกทั้งหมด" : "เลือกทั้งหมด";
   elements.selectAllBtn.disabled = state.busy || !hasRows;
   elements.deleteSelectedBtn.disabled = state.busy || selectedCount === 0;
@@ -761,6 +765,448 @@ function exportTableToExcel() {
   const filename = `slip-results-${buildTimestampForFilename()}.xlsx`;
   XLSX.writeFile(workbook, filename, { compression: true });
   setStatus(`Export Excel สำเร็จ (${excelRows.length} แถว)`, getCurrentProgressValue());
+}
+
+// ─── Receipt Export ──────────────────────────────────────────
+function exportReceipt() {
+  if (state.busy) return;
+
+  const rows = getDataRows();
+  const selectedRows = rows.filter((row) => {
+    const check = row.querySelector(".row-check");
+    return check instanceof HTMLInputElement && check.checked;
+  });
+
+  if (selectedRows.length === 0) {
+    setStatus("กรุณาเลือกแถวก่อนพิมพ์ใบเสร็จ", getCurrentProgressValue());
+    return;
+  }
+
+  // สร้างข้อมูลใบเสร็จแยกแต่ละรายการ
+  const receipts = selectedRows.map((row) => {
+    const cells = row.querySelectorAll("td");
+    return {
+      order: (cells[1]?.textContent || "").trim(),
+      amount: (cells[2]?.textContent || "").trim(),
+      memo: (cells[3]?.textContent || "").trim()
+    };
+  });
+
+  showReceiptModal(receipts, 0);
+}
+
+function buildReceiptHtml(item, index, total) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("th-TH", {
+    year: "numeric", month: "long", day: "numeric"
+  });
+  const timeStr = now.toLocaleTimeString("th-TH", {
+    hour: "2-digit", minute: "2-digit"
+  });
+  const receiptNo = `RCP-${buildTimestampForFilename()}-${String(index + 1).padStart(3, "0")}`;
+
+  const amountNum = parseNumber(item.amount);
+  const amountFormatted = Number.isFinite(amountNum)
+    ? amountNum.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : item.amount;
+
+  return `
+    <div class="receipt-content">
+      <div class="receipt-header">
+        <div class="receipt-logo">
+          <span class="logo-text">The Best Village</span>
+        </div>
+        <h3>เดอะเบสท์วิลเลจ</h3>
+        <p>ใบเสร็จรับเงิน / Receipt</p>
+        <p style="margin-top:4px;">${dateStr} เวลา ${timeStr}</p>
+        <p>เลขที่: ${receiptNo}</p>
+      </div>
+      <table class="receipt-table">
+        <thead>
+          <tr>
+            <th>รายการ</th>
+            <th>จำนวนเงิน (฿)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="receipt-memo-col">${escapeHtml(item.memo) || "-"}</td>
+            <td>${escapeHtml(item.amount)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="receipt-total">
+        <span>ยอดรวม</span>
+        <span>฿ ${amountFormatted}</span>
+      </div>
+      <div class="receipt-footer">
+        <p>ขอบคุณที่ใช้บริการ</p>
+      </div>
+    </div>
+  `;
+}
+// <p>เอกสารนี้ออกโดย Slip Manager</p>
+
+function showReceiptModal(receipts, currentIndex) {
+  const existing = document.getElementById("receiptModal");
+  if (existing) existing.remove();
+
+  const total = receipts.length;
+  const item = receipts[currentIndex];
+  const contentHtml = buildReceiptHtml(item, currentIndex, total);
+
+  const hasPrev = currentIndex > 0;
+  const hasNext = currentIndex < total - 1;
+
+  const overlay = document.createElement("div");
+  overlay.id = "receiptModal";
+  overlay.className = "receipt-overlay";
+  overlay.innerHTML = `
+    <div class="receipt-modal">
+      <div class="receipt-toolbar">
+        ${total > 1 ? `
+        <button class="receipt-prev ghost-btn" type="button" ${!hasPrev ? "disabled" : ""} style="flex:0;padding:10px 12px;font-size:1.1rem;">
+          ◀
+        </button>
+        <span class="receipt-counter">${currentIndex + 1} / ${total}</span>
+        <button class="receipt-next ghost-btn" type="button" ${!hasNext ? "disabled" : ""} style="flex:0;padding:10px 12px;font-size:1.1rem;">
+          ▶
+        </button>
+        ` : ""}
+        <button class="receipt-print btn-scan" type="button">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6V1h8v5"/><path d="M4 12H2a1 1 0 01-1-1V7a1 1 0 011-1h12a1 1 0 011 1v4a1 1 0 01-1 1h-2"/><rect x="4" y="9" width="8" height="5" rx="1"/></svg>
+          พิมพ์
+        </button>
+        <button class="receipt-save ghost-btn" type="button">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 10V1M4 6l4 4 4-4"/><path d="M1 12v2a1 1 0 001 1h12a1 1 0 001-1v-2"/></svg>
+          บันทึก PNG
+        </button>
+        ${total > 1 ? `
+        <button class="receipt-save-all ghost-btn" type="button">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 10V1M4 6l4 4 4-4"/><path d="M1 12v2a1 1 0 001 1h12a1 1 0 001-1v-2"/></svg>
+          บันทึกทั้งหมด
+        </button>
+        ` : ""}
+        <button class="receipt-close" type="button" style="flex:0;padding:10px 14px;background:transparent;color:var(--text-mid);border:1px solid var(--line);">
+          ✕
+        </button>
+      </div>
+      <div class="receipt-body">
+        ${contentHtml}
+      </div>
+    </div>
+  `;
+
+  const close = () => overlay.remove();
+  overlay.querySelector(".receipt-close").addEventListener("click", close);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  // Navigation
+  if (total > 1) {
+    const prevBtn = overlay.querySelector(".receipt-prev");
+    const nextBtn = overlay.querySelector(".receipt-next");
+    if (prevBtn) prevBtn.addEventListener("click", () => showReceiptModal(receipts, currentIndex - 1));
+    if (nextBtn) nextBtn.addEventListener("click", () => showReceiptModal(receipts, currentIndex + 1));
+
+    // Save all — download all receipts as PNG one by one
+    const saveAllBtn = overlay.querySelector(".receipt-save-all");
+    if (saveAllBtn) {
+      saveAllBtn.addEventListener("click", async () => {
+        saveAllBtn.disabled = true;
+        saveAllBtn.textContent = "กำลังบันทึก…";
+        await saveAllReceiptsAsImages(receipts);
+        saveAllBtn.textContent = "✓ เสร็จแล้ว";
+        setTimeout(() => {
+          saveAllBtn.disabled = false;
+          saveAllBtn.textContent = "บันทึกทั้งหมด";
+        }, 1500);
+      });
+    }
+  }
+
+  overlay.querySelector(".receipt-print").addEventListener("click", () => {
+    printReceiptContent(overlay.querySelector(".receipt-content"));
+  });
+
+  overlay.querySelector(".receipt-save").addEventListener("click", () => {
+    saveReceiptAsImage(receipts[currentIndex], currentIndex);
+  });
+
+  document.body.appendChild(overlay);
+
+  // Keyboard navigation
+  const onKey = (e) => {
+    if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); }
+    if (e.key === "ArrowLeft" && hasPrev) showReceiptModal(receipts, currentIndex - 1);
+    if (e.key === "ArrowRight" && hasNext) showReceiptModal(receipts, currentIndex + 1);
+  };
+  document.addEventListener("keydown", onKey);
+}
+
+async function saveAllReceiptsAsImages(receipts) {
+  for (let i = 0; i < receipts.length; i++) {
+    await saveReceiptAsImagePromise(receipts[i], i);
+    await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
+function saveReceiptAsImagePromise(item, index) {
+  return new Promise((resolve) => {
+    saveReceiptAsImage(item, index, resolve);
+  });
+}
+
+// ─── Print: เปิด window ใหม่มี inline style ครบ ─────────────
+function printReceiptContent(contentEl) {
+  if (!contentEl) return;
+  const html = contentEl.outerHTML;
+  const printWin = window.open("", "_blank", "width=450,height=650");
+  if (!printWin) { alert("กรุณาอนุญาต popup เพื่อพิมพ์ใบเสร็จ"); return; }
+  printWin.document.write(`<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <title>ใบเสร็จ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Sarabun', sans-serif; background: #fff; color: #1a1a1a; padding: 20px; }
+    .receipt-content { max-width: 400px; margin: 0 auto; }
+    .receipt-header { text-align: center; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 2px dashed #ccc; }
+    .receipt-logo { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 6px; }
+
+    .receipt-logo .logo-text { font-family: Georgia, 'Times New Roman', serif; font-size: 1.15rem; font-weight: 700; font-style: italic; color: #0e0e0e; letter-spacing: 2px; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18); }
+    .receipt-header h3 { font-size: 1.3rem; font-weight: 700; color: #0e0e0e; margin-bottom: 1px; }
+    .receipt-header p { font-size: 0.85rem; color: #888; margin-top: 2px; }
+    .receipt-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    .receipt-table thead th { text-align: left; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #666; border-bottom: 1px solid #ddd; padding: 8px 6px; }
+    .receipt-table thead th:last-child { text-align: right; }
+    .receipt-table tbody td { padding: 10px 6px; border-bottom: 1px solid #eee; font-size: 0.92rem; }
+    .receipt-table tbody td:last-child { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .receipt-memo-col { max-width: 200px; word-break: break-word; }
+    .receipt-total { display: flex; justify-content: space-between; padding: 14px 0; border-top: 2px dashed #ccc; margin-top: 4px; }
+    .receipt-total span:first-child { font-weight: 700; font-size: 1rem; }
+    .receipt-total span:last-child { font-weight: 700; font-size: 1.15rem; color: #0ea5a4; }
+    .receipt-footer { text-align: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; font-size: 0.8rem; color: #aaa; }
+    .receipt-footer p { margin: 2px 0; }
+    @page { margin: 0; size: auto; }
+    @media print {
+      html, body { margin: 0; padding: 15mm; }
+    }
+  </style>
+</head>
+<body>${html}</body>
+</html>`);
+  printWin.document.close();
+  // รอโหลด font ก่อนพิมพ์
+  setTimeout(() => {
+    printWin.focus();
+    printWin.print();
+    setTimeout(() => printWin.close(), 500);
+  }, 600);
+}
+
+// ─── Save PNG: วาด canvas โดยตรง (ไม่ใช้ foreignObject) ─────
+function saveReceiptAsImage(item, index, onDone) {
+  const canvas = document.createElement("canvas");
+  const scale = 2;
+  const W = 380;
+  const pad = 28;
+  const lineH = 22;
+  const ctx = canvas.getContext("2d");
+
+  // Pre-calculate layout
+  const amountNum = parseNumber(item.amount);
+  const amountStr = Number.isFinite(amountNum)
+    ? amountNum.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : item.amount;
+  const memo = item.memo || "-";
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
+  const timeStr = now.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
+  const receiptNo = `RCP-${buildTimestampForFilename()}-${String((index || 0) + 1).padStart(3, "0")}`;
+
+  // Wrap memo text
+  const maxMemoW = W - pad * 2 - 10;
+  const memoLines = wrapText(ctx, memo, maxMemoW, "15px Sarabun, sans-serif");
+
+  // Calculate height
+  let H = 0;
+  H += pad;       // top padding
+  H += 28;        // logo text
+  H += 8;         // gap after logo
+  H += 20;        // subtitle
+  H += 18;        // date
+  H += 18;        // receipt no
+  H += 18;        // dashed line gap
+  H += 4;         // spacing
+  H += 30;        // table header
+  H += Math.max(1, memoLines.length) * lineH + 16; // table row
+  H += 4;         // spacing
+  H += 18;        // dashed line
+  H += 36;        // total
+  H += 18;        // dashed line
+  H += 26;        // footer
+  H += pad;       // bottom padding
+
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+  ctx.scale(scale, scale);
+
+  // Background
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, W, H);
+
+  let y = pad;
+
+  // Logo text "The Best Village"
+  ctx.fillStyle = "#0e0e0e";
+  ctx.font = "italic bold 18px Georgia, 'Times New Roman', serif";
+  ctx.textAlign = "center";
+  ctx.letterSpacing = "2px";
+  ctx.fillText("The Best Village", W / 2, y + 18);
+  ctx.letterSpacing = "0px";
+  y += 28;
+  y += 8;
+
+  ctx.fillStyle = "#0e0e0e";
+  ctx.font = "bold 18px Sarabun, sans-serif";
+  ctx.textAlign = "center";
+  ctx.letterSpacing = "2px";
+  ctx.fillText("เดอะเบสท์วิลเลจ", W / 2, y + 18);
+  ctx.letterSpacing = "0px";
+  y += 28;
+  y += 8;
+
+  // Subtitle
+  ctx.fillStyle = "#888888";
+  ctx.font = "14px Sarabun, sans-serif";
+  ctx.fillText("\u0e43\u0e1a\u0e40\u0e2a\u0e23\u0e47\u0e08\u0e23\u0e31\u0e1a\u0e40\u0e07\u0e34\u0e19 / Receipt", W / 2, y + 14);
+  y += 20;
+
+  // Date
+  ctx.fillText(`${dateStr} \u0e40\u0e27\u0e25\u0e32 ${timeStr}`, W / 2, y + 14);
+  y += 18;
+
+  // Receipt no
+  ctx.fillText(`\u0e40\u0e25\u0e02\u0e17\u0e35\u0e48: ${receiptNo}`, W / 2, y + 14);
+  y += 18;
+
+  // Dashed line
+  y += 8;
+  drawDashedLine(ctx, pad, y, W - pad, y, "#cccccc");
+  y += 10;
+
+  // Table header
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#666666";
+  ctx.font = "bold 12px Sarabun, sans-serif";
+  ctx.fillText("\u0e23\u0e32\u0e22\u0e01\u0e32\u0e23", pad, y + 18);
+  ctx.textAlign = "right";
+  ctx.fillText("\u0e08\u0e33\u0e19\u0e27\u0e19\u0e40\u0e07\u0e34\u0e19 (\u0e3f)", W - pad, y + 18);
+  y += 24;
+  ctx.strokeStyle = "#dddddd";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, y);
+  ctx.lineTo(W - pad, y);
+  ctx.stroke();
+  y += 6;
+
+  // Table row — memo + amount
+  ctx.font = "15px Sarabun, sans-serif";
+  ctx.fillStyle = "#1a1a1a";
+  ctx.textAlign = "left";
+  memoLines.forEach((line, i) => {
+    ctx.fillText(line, pad, y + 16 + i * lineH);
+  });
+
+  ctx.textAlign = "right";
+  ctx.font = "bold 15px Sarabun, sans-serif";
+  ctx.fillText(item.amount, W - pad, y + 16);
+
+  y += Math.max(1, memoLines.length) * lineH + 10;
+
+  // Bottom border
+  ctx.strokeStyle = "#eeeeee";
+  ctx.beginPath();
+  ctx.moveTo(pad, y);
+  ctx.lineTo(W - pad, y);
+  ctx.stroke();
+  y += 4;
+
+  // Dashed total line
+  drawDashedLine(ctx, pad, y, W - pad, y, "#cccccc");
+  y += 14;
+
+  // Total
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#333333";
+  ctx.font = "bold 16px Sarabun, sans-serif";
+  ctx.fillText("\u0e22\u0e2d\u0e14\u0e23\u0e27\u0e21", pad, y + 16);
+  ctx.textAlign = "right";
+  ctx.fillStyle = "#0ea5a4";
+  ctx.font = "bold 18px Sarabun, sans-serif";
+  ctx.fillText(`\u0e3f ${amountStr}`, W - pad, y + 16);
+  y += 22;
+
+  // Footer dashed
+  drawDashedLine(ctx, pad, y, W - pad, y, "#eeeeee");
+  y += 14;
+
+  // Footer
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#aaaaaa";
+  ctx.font = "12px Sarabun, sans-serif";
+  ctx.fillText("\u0e02\u0e2d\u0e1a\u0e04\u0e38\u0e13\u0e17\u0e35\u0e48\u0e43\u0e0a\u0e49\u0e1a\u0e23\u0e34\u0e01\u0e32\u0e23", W / 2, y + 12);
+
+  // Download
+  canvas.toBlob((b) => {
+    if (!b) { if (onDone) onDone(); return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    const suffix = typeof index === "number" ? `-${String(index + 1).padStart(3, "0")}` : "";
+    a.download = `receipt-${buildTimestampForFilename()}${suffix}.png`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    if (onDone) onDone();
+  }, "image/png");
+}
+
+function wrapText(ctx, text, maxWidth, font) {
+  ctx.font = font;
+  const words = text.split("");
+  const lines = [];
+  let current = "";
+  for (const char of words) {
+    const test = current + char;
+    if (ctx.measureText(test).width > maxWidth && current.length > 0) {
+      lines.push(current);
+      current = char;
+    } else {
+      current = test;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [""];
+}
+
+function drawDashedLine(ctx, x1, y1, x2, y2, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function buildTimestampForFilename() {
